@@ -281,7 +281,7 @@ def main_loop(stdscr, state: GameState, use_ascii: bool = False):
     else:
         heart_full, heart_empty = "❤", "♡"
 
-    msg = "Use arrows/WASD to navigate, [Space]=Select, [Enter]=Submit, f=shuffle, c=clear, q=quit"
+    msg = "WASD=move, [Space]=select, [Enter]=submit. shu[f]fle, [c]lear, [q]uit"
     cursor = 0
     board_start_y = 0  # Will be calculated on first draw
 
