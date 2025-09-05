@@ -4,5 +4,5 @@ requires-python = ">=3.8"
 
 [[package]]
 name = "connections-tui"
-version = "0.0.4"
+version = "0.0.6"
 source = { editable = "." }

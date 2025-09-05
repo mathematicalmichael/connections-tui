@@ -47,6 +47,9 @@ class GameState:
     strikes: int = 0
     max_strikes: int = 4
     one_away_msg: str | None = None
+    # For optimized redrawing
+    last_cursor: int = -1
+    needs_full_redraw: bool = True
 
 
 def load_puzzle_from_json(obj: dict) -> List[Group]:
@@ -174,8 +177,63 @@ def chunk(seq: List[str], n: int) -> List[List[str]]:
     return [seq[i : i + n] for i in range(0, len(seq), n)]
 
 
-def run_curses(state: GameState):
-    curses.wrapper(lambda stdscr: main_loop(stdscr, state))
+def draw_board_tile(
+    stdscr,
+    word: str,
+    row: int,
+    col: int,
+    board_cols: int,
+    top: int,
+    col_w: int,
+    attr: int,
+    w: int,
+):
+    """Draw a single board tile at the specified position."""
+    tile = f"[ {word} ]"
+    x = 2 + col * col_w
+    yline = top + row
+    # Truncate if needed
+    if x + len(tile) >= w - 1:
+        tile = tile[: max(0, w - x - 1)]
+    stdscr.addstr(yline, x, tile, attr)
+
+
+def redraw_board_area(stdscr, state: GameState, board_start_y: int, w: int):
+    """Redraw only the board area, preserving other content."""
+    board_cols = 4
+    grid = chunk(state.remaining_words, board_cols)
+    total_tiles = len(state.remaining_words)
+
+    if total_tiles == 0:
+        draw_centered(
+            stdscr, board_start_y, "🎉 All groups solved! Press n=next, p=prev, q=quit."
+        )
+        return
+
+    # Clear the board area first
+    h, _ = stdscr.getmaxyx()
+    for y in range(board_start_y, h - 3):  # Leave space for footer
+        stdscr.move(y, 0)
+        stdscr.clrtoeol()
+
+    # Draw the board
+    for r, row in enumerate(grid):
+        for c, word in enumerate(row):
+            idx = r * board_cols + c
+            # Layout spacing
+            col_w = max(18, max(len(wd) + 4 for wd in row))
+            attr = 0
+            if idx == state.last_cursor:
+                attr |= curses.A_REVERSE | curses.A_BOLD
+            if idx in state.selection_idx:
+                attr |= curses.color_pair(1)  # Selection highlight
+            draw_board_tile(
+                stdscr, word, r, c, board_cols, board_start_y, col_w, attr, w
+            )
+
+
+def run_curses(state: GameState, use_ascii: bool = False):
+    curses.wrapper(lambda stdscr: main_loop(stdscr, state, use_ascii))
 
 
 def load_day_into_state(state: GameState, day_offset: int):
@@ -194,9 +252,12 @@ def load_day_into_state(state: GameState, day_offset: int):
     state.selection_idx.clear()
     state.strikes = 0
     state.one_away_msg = None
+    # Reset redraw tracking
+    state.last_cursor = -1
+    state.needs_full_redraw = True
 
 
-def main_loop(stdscr, state: GameState):
+def main_loop(stdscr, state: GameState, use_ascii: bool = False):
     curses.curs_set(0)
     stdscr.nodelay(False)
     curses.start_color()
@@ -207,7 +268,7 @@ def main_loop(stdscr, state: GameState):
 
     # Solved category color pairs, mapped by difficulty 0..3:
     # 0→green, 1→yellow, 2→cyan, 3→magenta
-    # We’ll use pair indices 2..5 for convenience.
+    # We'll use pair indices 2..5 for convenience.
     color_pairs_by_diff = {}
     for diff_rank, pair_idx in zip(range(4), range(2, 6)):
         fg = curses.COLOR_BLACK
@@ -215,67 +276,60 @@ def main_loop(stdscr, state: GameState):
         curses.init_pair(pair_idx, fg, bg)
         color_pairs_by_diff[diff_rank] = curses.color_pair(pair_idx)
 
-    msg = "Use arrows/WASD to navigate, [Space]=Select, [Enter]=Submit, f=shuffle, c=clear, q=quit"
+    if use_ascii:
+        heart_full, heart_empty = "O", "x"
+    else:
+        heart_full, heart_empty = "❤", "♡"
+
+    msg = "WASD=move, [Space]=select, [Enter]=submit. shu[f]fle, [c]lear, [q]uit"
     cursor = 0
+    board_start_y = 0  # Will be calculated on first draw
 
     while True:
-        stdscr.clear()
         h, w = stdscr.getmaxyx()
 
-        # Header
-        draw_centered(stdscr, 0, f"NYT Connections — {state.date_str}")
-        strikes_left = state.max_strikes - state.strikes
-        hearts = "❤" * strikes_left + "♡" * (state.max_strikes - strikes_left)
-        draw_centered(stdscr, 1, f"Strikes: {hearts}")
+        # Only do full redraw when necessary
+        if state.needs_full_redraw:
+            stdscr.clear()
 
-        # Solved groups
-        y = 3
-        if state.solved:
-            stdscr.addstr(y, 2, "Solved groups:")
-            y += 1
-            for _, (title, words, diff_rank) in enumerate(state.solved):
-                # Ensure diff_rank in 0..3
-                if not isinstance(diff_rank, int) or diff_rank < 0 or diff_rank > 3:
-                    diff_rank = 0
-                color = color_pairs_by_diff[diff_rank]
-                line = f" - {title}: {', '.join(words)}"
-                stdscr.addstr(y, 2, line[: max(0, w - 4)], color)
-                y += 1
-        else:
-            stdscr.addstr(y, 2, "Solved groups: (none yet)")
-            y += 1
-
-        # Board
-        board_cols = 4
-        grid = chunk(state.remaining_words, board_cols)
-        top = y + 1
-        # Keep cursor in range
-        total_tiles = len(state.remaining_words)
-        if total_tiles == 0:
-            draw_centered(
-                stdscr, top, "🎉 All groups solved! Press n=next, p=prev, q=quit."
+            # Header
+            draw_centered(stdscr, 0, f"NYT Connections — {state.date_str}")
+            strikes_left = state.max_strikes - state.strikes
+            hearts = heart_full * strikes_left + heart_empty * (
+                state.max_strikes - strikes_left
             )
-        else:
-            cursor = max(0, min(cursor, total_tiles - 1))
-            for r, row in enumerate(grid):
-                for c, word in enumerate(row):
-                    idx = r * board_cols + c
-                    tile = f"[ {word} ]"
-                    # Layout spacing
-                    col_w = max(18, max(len(wd) + 4 for wd in row))
-                    x = 2 + c * col_w
-                    yline = top + r
-                    attr = 0
-                    if idx == cursor:
-                        attr |= curses.A_REVERSE | curses.A_BOLD
-                    if idx in state.selection_idx:
-                        attr |= sel_attr
-                    # Truncate if needed
-                    if x + len(tile) >= w - 1:
-                        tile = tile[: max(0, w - x - 1)]
-                    stdscr.addstr(yline, x, tile, attr)
+            draw_centered(stdscr, 1, f"Strikes: {hearts}")
 
-        # Footer messages
+            # Solved groups
+            y = 3
+            if state.solved:
+                stdscr.addstr(y, 2, "Solved groups:")
+                y += 1
+                for _, (title, words, diff_rank) in enumerate(state.solved):
+                    # Ensure diff_rank in 0..3
+                    if not isinstance(diff_rank, int) or diff_rank < 0 or diff_rank > 3:
+                        diff_rank = 0
+                    color = color_pairs_by_diff[diff_rank]
+                    line = f" - {title}: {', '.join(words)}"
+                    stdscr.addstr(y, 2, line[: max(0, w - 4)], color)
+                    y += 1
+            else:
+                stdscr.addstr(y, 2, "Solved groups: (none yet)")
+                y += 1
+
+            board_start_y = y + 1
+            state.needs_full_redraw = False
+
+        # Update cursor position first, then redraw so highlight matches movement
+        total_tiles = len(state.remaining_words)
+        if total_tiles > 0:
+            cursor = max(0, min(cursor, total_tiles - 1))
+        state.last_cursor = cursor
+
+        # Redraw board area (this is where cursor movement happens)
+        redraw_board_area(stdscr, state, board_start_y, w)
+
+        # Footer messages (only redraw if they might have changed)
         if state.one_away_msg:
             draw_centered(stdscr, h - 3, state.one_away_msg)
         draw_centered(stdscr, h - 2, msg)
@@ -284,6 +338,10 @@ def main_loop(stdscr, state: GameState):
             draw_centered(
                 stdscr, h - 4, "💥 Out of mistakes! Press q to quit or c to reveal."
             )
+
+        if all_groups_solved(state):
+            draw_centered(stdscr, h - 4, "🎉 Perfect! Press n=next, p=prev, q=quit.")
+
         stdscr.refresh()
 
         # Input
@@ -320,17 +378,17 @@ def main_loop(stdscr, state: GameState):
                             w for w in state.remaining_words if w not in g.words
                         ]
                 state.selection_idx.clear()
+                state.needs_full_redraw = True
             else:
                 state.selection_idx.clear()
                 state.one_away_msg = None
         elif ch in (10, 13):  # Enter
             if total_tiles:
                 ok, feedback = submit_selection(state)
-                # Repack board indices (since words may have been removed)
                 if not ok:
                     # little flash on error — also refresh the hearts immediately
                     strikes_left = state.max_strikes - state.strikes
-                    hearts = "❤" * strikes_left + "♡" * (
+                    hearts = heart_full * strikes_left + heart_empty * (
                         state.max_strikes - strikes_left
                     )
                     draw_centered(stdscr, 1, f"Strikes: {hearts}")
@@ -342,10 +400,7 @@ def main_loop(stdscr, state: GameState):
                     total_tiles = len(state.remaining_words)
                     if total_tiles:
                         cursor = min(cursor, total_tiles - 1)
-        elif ch in (
-            ord("S"),
-        ):  # capital S already handled by down; use lower 's' for shuffle: remap
-            pass
+                    state.needs_full_redraw = True
         elif ch in (ord("f"), ord("F")):  # shuffle board
             # Keep selected words selected by value after shuffle
             selected_words = {state.remaining_words[i] for i in state.selection_idx}
@@ -353,7 +408,6 @@ def main_loop(stdscr, state: GameState):
             state.selection_idx = {
                 i for i, w in enumerate(state.remaining_words) if w in selected_words
             }
-
         elif ch == ord("n"):
             # Load next day's puzzle, but only after completion
             if all_groups_solved(state):
@@ -371,9 +425,25 @@ def main_loop(stdscr, state: GameState):
                 except Exception as e:
                     state.one_away_msg = f"Couldn't load previous day: {e}"
 
-        if all_groups_solved(state):
-            draw_centered(stdscr, h - 4, "🎉 Perfect! Press n=next, p=prev, q=quit.")
-
+        # Immediate redraw so movement/selection reflects the latest input
+        h, w = stdscr.getmaxyx()
+        if not state.needs_full_redraw:
+            total_tiles = len(state.remaining_words)
+            if total_tiles > 0:
+                cursor = max(0, min(cursor, total_tiles - 1))
+            state.last_cursor = cursor
+            redraw_board_area(stdscr, state, board_start_y, w)
+            if state.one_away_msg:
+                draw_centered(stdscr, h - 3, state.one_away_msg)
+            draw_centered(stdscr, h - 2, msg)
+            if state.strikes >= state.max_strikes:
+                draw_centered(
+                    stdscr, h - 4, "💥 Out of mistakes! Press q to quit or c to reveal."
+                )
+            if all_groups_solved(state):
+                draw_centered(
+                    stdscr, h - 4, "🎉 Perfect! Press n=next, p=prev, q=quit."
+                )
             stdscr.refresh()
 
 
@@ -388,6 +458,11 @@ def parse_args():
         "--file", dest="file", help="Play from a local JSON file instead of fetching"
     )
     ap.add_argument("--seed", type=int, help="Random seed for reproducible shuffles")
+    ap.add_argument(
+        "--ascii",
+        action="store_true",
+        help="Use ASCII-only characters for strikes display (hearts)",
+    )
     return ap.parse_args()
 
 
@@ -411,7 +486,7 @@ def main():
 
     board = make_initial_board(groups)
     state = GameState(date_str=date_str, groups=groups, remaining_words=board)
-    run_curses(state)
+    run_curses(state, use_ascii=args.ascii)
 
 
 def run():
