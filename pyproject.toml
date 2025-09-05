@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "connections-tui"
-version = "0.0.4"
+version = "0.0.5"
 description = "Play NYT Connections in the Terminal with no additional dependencies."
 readme = "README.md"
 license = "MIT"
@@ -18,4 +18,8 @@ dependencies = []
 
 [project.scripts]
 connections-tui = "connections_tui:run"
+
+[project.urls]
+Homepage = "https://github.com/mathematicalmichael/connections-tui"
+Repository = "https://github.com/mathematicalmichael/connections-tui.git"
 
