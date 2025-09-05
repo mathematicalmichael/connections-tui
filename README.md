@@ -9,16 +9,16 @@ A lightweight, dependency-free TUI for playing the NYT Connections game in your 
 
 Here's a glimpse of what it looks like in action:
 ```
-$ connections-tui
-NYT Connections — 2023-10-27
-              Strikes: ❤❤❤❤
+$ connections-tui -d 2024-08-23
+              NYT Connections — 2024-08-23
+                     Strikes: ❤❤❤❤❤
 
 Solved groups: (none yet)
 
-       [ LENTIL ]      [ KIDNEY ]       [ PINTO ]       [ BLACK ]
-       [ CLUE ]        [ RISK ]         [ SORRY ]       [ MONOPOLY ]
-       [ NAVY ]        [ ROMAN ]        [ CHICKPEA ]    [ ARIAL ]
-       [ TIMES ]       [ COMIC SANS ]   [ GARAMOND ]    [ BEIGE ]
+  [ BUFF ]          [ CREAM ]         [ FINISH ]        [ FAWN ]
+  [ TAN ]           [ MONITOR ]       [ GLOVES ]        [ BOA ]
+  [ CHECK ]         [ TERMINAL ]      [ TIE ]           [ FAN ]
+  [ SCREEN ]        [ CORSET ]        [ DISPLAY ]       [ BASK ]
 
 Use arrows/WASD to navigate, [Space]=Select, [Enter]=Submit, f=shuffle, c=clear, q=quit
 ```
@@ -35,16 +35,20 @@ Use arrows/WASD to navigate, [Space]=Select, [Enter]=Submit, f=shuffle, c=clear,
 - Load puzzles from local JSON files for offline play or custom games.
 - Set a random seed for reproducible shuffles.
 
-## Installation
+## Installation and Usage
 
-Install directly from PyPI:
+Arguably the simplest way to run the project is with `uv`:
+
 ```bash
-pip install connections-tui
+uvx connections-tui@latest
 ```
 
-## Usage
+You can of course install directly from PyPI:
+```bash
+pip install -U connections-tui
+```
 
-Simply run the command in your terminal:
+and run the console command in your terminal:
 ```bash
 connections-tui
 ```
