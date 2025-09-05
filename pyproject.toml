@@ -1,0 +1,17 @@
+[project]
+name = "connections-tui"
+version = "0.0.2"
+description = "Play NYT Connections in the Terminal with no additional dependencies."
+readme = "README.md"
+authors = [
+    { name = "Michael Pilosov", email = "consistentbayes@gmail.com" }
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+connections-tui = "connections_tui:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
