@@ -455,11 +455,11 @@ def parse_args():
         "-d", "--date", dest="date", help="Puzzle date YYYY-MM-DD (default: today)"
     )
     ap.add_argument(
-        "--file", dest="file", help="Play from a local JSON file instead of fetching"
+        "-f", "--file", dest="file", help="Play from a local JSON file instead of fetching"
     )
-    ap.add_argument("--seed", type=int, help="Random seed for reproducible shuffles")
+    ap.add_argument("-s", "--seed", type=int, help="Random seed for reproducible shuffles")
     ap.add_argument(
-        "--ascii",
+        "-a", "--ascii",
         action="store_true",
         help="Use ASCII-only characters for strikes display (hearts)",
     )

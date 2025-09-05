@@ -56,9 +56,9 @@ You can customize the game with these arguments:
 | Argument | Shorthand | Description |
 |---|---|---|
 | `--date <YYYY-MM-DD>` | `-d` | Play the puzzle for a specific date. (Default: today) |
-| `--file <path/to/file.json>` | | Play from a local JSON puzzle file. |
-| `--seed <integer>` | | Set the random seed for reproducible board shuffles. |
-| `--ascii` | | Use ASCII characters (`O`/`x`) for strikes instead of hearts. |
+| `--file <path/to/file.json>` | `-f` | Play from a local JSON puzzle file. |
+| `--seed <integer>` | `-s` | Set the random seed for reproducible board shuffles. |
+| `--ascii` | `-a` | Use ASCII characters (`O`/`x`) for strikes instead of hearts. |
 
 Example:
 ```bash
