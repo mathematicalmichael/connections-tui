@@ -1,6 +1,6 @@
 [project]
 name = "connections-tui"
-version = "0.0.2"
+version = "0.0.4"
 description = "Play NYT Connections in the Terminal with no additional dependencies."
 readme = "README.md"
 authors = [

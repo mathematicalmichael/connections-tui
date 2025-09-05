@@ -202,7 +202,7 @@ def main_loop(stdscr, state: GameState):
     curses.start_color()
     curses.use_default_colors()
     # Selection highlight
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
     sel_attr = curses.color_pair(1)
 
     # Solved category color pairs, mapped by difficulty 0..3:
