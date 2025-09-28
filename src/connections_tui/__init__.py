@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-NYT_URL_TEMPLATE = "https://www.nytimes.com/svc/connections/v1/{date}.json"
+NYT_URL_TEMPLATE = "https://www.nytimes.com/svc/connections/v2/{date}.json"
 EASIEST_TO_HARDEST_COLORS = [
     curses.COLOR_GREEN,
     curses.COLOR_YELLOW,
@@ -33,6 +33,8 @@ class Group:
     words: Set[str]
     # difficulty may exist in NYT JSON, but we don't rely on it:
     difficulty: int | None = None
+    # positions for v2 API format: list of (word, position) tuples
+    positions: List[Tuple[str, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -52,49 +54,36 @@ class GameState:
     needs_full_redraw: bool = True
 
 
+@staticmethod
 def load_puzzle_from_json(obj: dict) -> List[Group]:
     """
-    The NYT Connections JSON (per public docs & community code) has:
-        data["groups"][<category>]["members"] -> list[str] of 4 words
-    We'll parse robustly and ignore other metadata.
+    Parse NYT Connections JSON from v2 API format:
+        data["categories"][i]["title"] -> category name
+        data["categories"][i]["cards"] -> list of {"content": word, "position": pos}
     """
-    if "groups" not in obj:
-        raise ValueError("Unexpected JSON: missing 'groups'")
+    if "categories" not in obj:
+        raise ValueError("Unexpected JSON: missing 'categories' (v2 format only)")
 
-    # Collect raw groups with possible difficulty levels (some puzzles omit them)
     groups: List[Group] = []
-    for title, payload in obj["groups"].items():
-        # payload could be dict with "members" (normal), or directly a list in some dumps
-        if isinstance(payload, dict):
-            members = (
-                payload.get("members") or payload.get("words") or payload.get("tiles")
-            )
-            difficulty = (
-                payload.get("level") if isinstance(payload.get("level"), int) else None
-            )
-        else:
-            members = payload
-            difficulty = None
-        if not isinstance(members, list) or len(members) != 4:
-            raise ValueError(f"Group '{title}' doesn't look like 4-word list.")
-        groups.append(Group(title=title, words=set(members), difficulty=difficulty))
+    categories = obj["categories"]
+    for i, category in enumerate(categories):
+        title = category["title"]
+        cards = category.get("cards", [])
 
-    # Normalize difficulties to 0..3 if present; otherwise assign by order.
-    # Accept common shapes like {0,1,2,3} or {1,2,3,4}.
-    diffs = [g.difficulty for g in groups]
-    if all(isinstance(d, int) for d in diffs) and None not in diffs:
-        mn, mx = min(diffs), max(diffs)
-        # If levels are 1..4, shift to 0..3; if already 0..3 leave as is.
-        if {mn, mx} == {1, 4} or (mn == 1 and mx == 4):
-            for g in groups:
-                g.difficulty = g.difficulty - 1
-        # If not in 0..3 after this, clamp just in case
-        for g in groups:
-            g.difficulty = max(0, min(3, int(g.difficulty)))
-    else:
-        # Fallback: assign by encounter order (stable)
-        for i, g in enumerate(groups):
-            g.difficulty = i  # 0..3
+        if not isinstance(cards, list) or len(cards) != 4:
+            raise ValueError(f"Category '{title}' doesn't have exactly 4 cards.")
+
+        members = [card["content"] for card in cards]
+        # Store position info for board layout
+        positions = [(card["content"], card["position"]) for card in cards]
+
+        # Assume difficulty is category order (0-3)
+        difficulty = i
+        group = Group(title=title, words=set(members), difficulty=difficulty)
+        # Store positions for later use in board creation
+        group.positions = positions
+        groups.append(group)
+
     return groups
 
 
@@ -109,7 +98,7 @@ def fetch_nyt_puzzle(date_str: str) -> List[Group]:
         if e.code == 404:
             raise RuntimeError(
                 f"No puzzle JSON found for {date_str} (HTTP 404). "
-                "Connections goes by NYT’s server date; try a different date with -d."
+                "Connections goes by NYT's server date; try a different date with -d."
             ) from e
         raise
     except Exception as e:
@@ -117,13 +106,38 @@ def fetch_nyt_puzzle(date_str: str) -> List[Group]:
 
 
 def make_initial_board(groups: List[Group]) -> List[str]:
-    # If NYT provides a starting order we could use it, but groups cover all 16,
-    # so we build and shuffle a board to mimic the tile grid.
-    words: List[str] = []
-    for g in groups:
-        words.extend(sorted(g.words, key=str.lower))
-    random.shuffle(words)
-    return words
+    # For v2 format, use position data to create initial board layout
+    # For v1 format, fall back to shuffled board
+
+    # Check if we have position data (v2 format)
+    has_positions = any(hasattr(g, "positions") and g.positions for g in groups)
+
+    if has_positions:
+        # Create a list of 16 words positioned according to v2 data
+        board = [None] * 16
+        for g in groups:
+            if hasattr(g, "positions") and g.positions:
+                for word, position in g.positions:
+                    if 0 <= position < 16:
+                        board[position] = word
+
+        # Fill any None slots with remaining words (shouldn't happen with valid data)
+        words = [w for w in board if w is not None]
+        if len(words) != 16:
+            # Fallback: collect all words and shuffle
+            words = []
+            for g in groups:
+                words.extend(sorted(g.words, key=str.lower))
+            random.shuffle(words)
+
+        return words
+    else:
+        # Legacy v1 behavior: collect and shuffle
+        words: List[str] = []
+        for g in groups:
+            words.extend(sorted(g.words, key=str.lower))
+        random.shuffle(words)
+        return words
 
 
 def submit_selection(state: GameState) -> Tuple[bool, str]:
@@ -185,16 +199,40 @@ def draw_board_tile(
     board_cols: int,
     top: int,
     col_w: int,
+    col_ws: list,
     attr: int,
     w: int,
 ):
     """Draw a single board tile at the specified position."""
-    tile = f"[ {word} ]"
-    x = 2 + col * col_w
+    # Create tile exactly col_w wide with centered word
+    opening = "[ "
+    closing = " ]"
+    opening_len = len(opening)
+    closing_len = len(closing)
+    available = col_w - opening_len - closing_len
+    word_len = len(word)
+
+    if word_len > available:
+        # Word too long: minimal padding (truncate if necessary)
+        word_part = word[:available]
+        tile = opening + word_part + closing
+    else:
+        # Center the word within available space
+        left_pad = (available - word_len) // 2
+        right_pad = available - word_len - left_pad
+        tile = opening + (" " * left_pad) + word + (" " * right_pad) + closing
+
+    # Ensure tile is exactly col_w (pad/truncate if needed)
+    if len(tile) < col_w:
+        tile += " " * (col_w - len(tile))
+    elif len(tile) > col_w:
+        tile = tile[:col_w]
+
+    x = sum(col_ws[:col]) if col_ws else col * col_w  # Use precalculated widths
     yline = top + row
-    # Truncate if needed
-    if x + len(tile) >= w - 1:
-        tile = tile[: max(0, w - x - 1)]
+    # Truncate only if it exceeds terminal width
+    if x + col_w >= w:
+        tile = tile[: w - x]
     stdscr.addstr(yline, x, tile, attr)
 
 
@@ -216,19 +254,29 @@ def redraw_board_area(stdscr, state: GameState, board_start_y: int, w: int):
         stdscr.move(y, 0)
         stdscr.clrtoeol()
 
+    # Calculate consistent column widths based on max word length across all rows
+    max_word_len_per_col = [0] * board_cols
+    for row in grid:
+        for c, word in enumerate(row):
+            max_word_len_per_col[c] = max(max_word_len_per_col[c], len(word))
+
+    col_ws = []
+    for max_len in max_word_len_per_col:
+        col_w = max(18, max_len + 6)  # +6 for spacing/padding
+        col_ws.append(col_w)
+
     # Draw the board
     for r, row in enumerate(grid):
         for c, word in enumerate(row):
             idx = r * board_cols + c
-            # Layout spacing
-            col_w = max(18, max(len(wd) + 4 for wd in row))
+            col_w = col_ws[c]
             attr = 0
             if idx == state.last_cursor:
                 attr |= curses.A_REVERSE | curses.A_BOLD
             if idx in state.selection_idx:
                 attr |= curses.color_pair(1)  # Selection highlight
             draw_board_tile(
-                stdscr, word, r, c, board_cols, board_start_y, col_w, attr, w
+                stdscr, word, r, c, board_cols, board_start_y, col_w, col_ws, attr, w
             )
 
 
@@ -373,7 +421,9 @@ def main_loop(stdscr, state: GameState, use_ascii: bool = False):
                 for g in state.groups:
                     if g.words & set(state.remaining_words):
                         words_sorted = sorted(list(g.words), key=str.lower)
-                        state.solved.append((g.title, words_sorted))
+                        state.solved.append(
+                            (g.title, words_sorted, int(g.difficulty or 0))
+                        )
                         state.remaining_words = [
                             w for w in state.remaining_words if w not in g.words
                         ]
@@ -455,11 +505,17 @@ def parse_args():
         "-d", "--date", dest="date", help="Puzzle date YYYY-MM-DD (default: today)"
     )
     ap.add_argument(
-        "-f", "--file", dest="file", help="Play from a local JSON file instead of fetching"
+        "-f",
+        "--file",
+        dest="file",
+        help="Play from a local JSON file instead of fetching",
     )
-    ap.add_argument("-s", "--seed", type=int, help="Random seed for reproducible shuffles")
     ap.add_argument(
-        "-a", "--ascii",
+        "-s", "--seed", type=int, help="Random seed for reproducible shuffles"
+    )
+    ap.add_argument(
+        "-a",
+        "--ascii",
         action="store_true",
         help="Use ASCII-only characters for strikes display (hearts)",
     )
