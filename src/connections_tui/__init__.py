@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-NYT_URL_TEMPLATE = "https://www.nytimes.com/svc/connections/v1/{date}.json"
+NYT_URL_TEMPLATE = "https://www.nytimes.com/svc/connections/v2/{date}.json"
 EASIEST_TO_HARDEST_COLORS = [
     curses.COLOR_GREEN,
     curses.COLOR_YELLOW,
@@ -33,6 +33,8 @@ class Group:
     words: Set[str]
     # difficulty may exist in NYT JSON, but we don't rely on it:
     difficulty: int | None = None
+    # positions for v2 API format: list of (word, position) tuples
+    positions: List[Tuple[str, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -54,47 +56,72 @@ class GameState:
 
 def load_puzzle_from_json(obj: dict) -> List[Group]:
     """
-    The NYT Connections JSON (per public docs & community code) has:
-        data["groups"][<category>]["members"] -> list[str] of 4 words
-    We'll parse robustly and ignore other metadata.
+    Parse NYT Connections JSON from v2 API format:
+        data["categories"][i]["title"] -> category name
+        data["categories"][i]["cards"] -> list of {"content": word, "position": pos}
+    Also supports legacy v1 format for backward compatibility.
     """
-    if "groups" not in obj:
-        raise ValueError("Unexpected JSON: missing 'groups'")
-
-    # Collect raw groups with possible difficulty levels (some puzzles omit them)
     groups: List[Group] = []
-    for title, payload in obj["groups"].items():
-        # payload could be dict with "members" (normal), or directly a list in some dumps
-        if isinstance(payload, dict):
-            members = (
-                payload.get("members") or payload.get("words") or payload.get("tiles")
-            )
-            difficulty = (
-                payload.get("level") if isinstance(payload.get("level"), int) else None
-            )
-        else:
-            members = payload
-            difficulty = None
-        if not isinstance(members, list) or len(members) != 4:
-            raise ValueError(f"Group '{title}' doesn't look like 4-word list.")
-        groups.append(Group(title=title, words=set(members), difficulty=difficulty))
-
-    # Normalize difficulties to 0..3 if present; otherwise assign by order.
-    # Accept common shapes like {0,1,2,3} or {1,2,3,4}.
-    diffs = [g.difficulty for g in groups]
-    if all(isinstance(d, int) for d in diffs) and None not in diffs:
-        mn, mx = min(diffs), max(diffs)
-        # If levels are 1..4, shift to 0..3; if already 0..3 leave as is.
-        if {mn, mx} == {1, 4} or (mn == 1 and mx == 4):
+    
+    # Handle v2 format (current)
+    if "categories" in obj:
+        categories = obj["categories"]
+        for i, category in enumerate(categories):
+            title = category["title"]
+            cards = category.get("cards", [])
+            
+            if not isinstance(cards, list) or len(cards) != 4:
+                raise ValueError(f"Category '{title}' doesn't have exactly 4 cards.")
+            
+            members = [card["content"] for card in cards]
+            # Store position info for board layout
+            positions = [(card["content"], card["position"]) for card in cards]
+            
+            # Assume difficulty is category order (0-3)
+            difficulty = i
+            group = Group(title=title, words=set(members), difficulty=difficulty)
+            # Store positions for later use in board creation
+            group.positions = positions
+            groups.append(group)
+    
+    # Handle legacy v1 format for backward compatibility
+    elif "groups" in obj:
+        for title, payload in obj["groups"].items():
+            # payload could be dict with "members" (normal), or directly a list in some dumps
+            if isinstance(payload, dict):
+                members = (
+                    payload.get("members") or payload.get("words") or payload.get("tiles")
+                )
+                difficulty = (
+                    payload.get("level") if isinstance(payload.get("level"), int) else None
+                )
+            else:
+                members = payload
+                difficulty = None
+            if not isinstance(members, list) or len(members) != 4:
+                raise ValueError(f"Group '{title}' doesn't look like 4-word list.")
+            groups.append(Group(title=title, words=set(members), difficulty=difficulty))
+        
+        # Normalize difficulties to 0..3 if present; otherwise assign by order.
+        # Accept common shapes like {0,1,2,3} or {1,2,3,4}.
+        diffs = [g.difficulty for g in groups]
+        if all(isinstance(d, int) for d in diffs) and None not in diffs:
+            mn, mx = min(diffs), max(diffs)
+            # If levels are 1..4, shift to 0..3; if already 0..3 leave as is.
+            if {mn, mx} == {1, 4} or (mn == 1 and mx == 4):
+                for g in groups:
+                    g.difficulty = g.difficulty - 1
+            # If not in 0..3 after this, clamp just in case
             for g in groups:
-                g.difficulty = g.difficulty - 1
-        # If not in 0..3 after this, clamp just in case
-        for g in groups:
-            g.difficulty = max(0, min(3, int(g.difficulty)))
+                g.difficulty = max(0, min(3, int(g.difficulty)))
+        else:
+            # Fallback: assign by encounter order (stable)
+            for i, g in enumerate(groups):
+                g.difficulty = i  # 0..3
+    
     else:
-        # Fallback: assign by encounter order (stable)
-        for i, g in enumerate(groups):
-            g.difficulty = i  # 0..3
+        raise ValueError("Unexpected JSON: missing 'categories' (v2) or 'groups' (v1)")
+    
     return groups
 
 
@@ -117,13 +144,38 @@ def fetch_nyt_puzzle(date_str: str) -> List[Group]:
 
 
 def make_initial_board(groups: List[Group]) -> List[str]:
-    # If NYT provides a starting order we could use it, but groups cover all 16,
-    # so we build and shuffle a board to mimic the tile grid.
-    words: List[str] = []
-    for g in groups:
-        words.extend(sorted(g.words, key=str.lower))
-    random.shuffle(words)
-    return words
+    # For v2 format, use position data to create initial board layout
+    # For v1 format, fall back to shuffled board
+    
+    # Check if we have position data (v2 format)
+    has_positions = any(hasattr(g, 'positions') and g.positions for g in groups)
+    
+    if has_positions:
+        # Create a list of 16 words positioned according to v2 data
+        board = [None] * 16
+        for g in groups:
+            if hasattr(g, 'positions') and g.positions:
+                for word, position in g.positions:
+                    if 0 <= position < 16:
+                        board[position] = word
+        
+        # Fill any None slots with remaining words (shouldn't happen with valid data)
+        words = [w for w in board if w is not None]
+        if len(words) != 16:
+            # Fallback: collect all words and shuffle
+            words = []
+            for g in groups:
+                words.extend(sorted(g.words, key=str.lower))
+            random.shuffle(words)
+        
+        return words
+    else:
+        # Legacy v1 behavior: collect and shuffle
+        words: List[str] = []
+        for g in groups:
+            words.extend(sorted(g.words, key=str.lower))
+        random.shuffle(words)
+        return words
 
 
 def submit_selection(state: GameState) -> Tuple[bool, str]:
