@@ -204,21 +204,23 @@ def draw_board_tile(
     w: int,
 ):
     """Draw a single board tile at the specified position."""
-    # Create tile exactly col_w wide with left-aligned word
+    # Create tile exactly col_w wide with centered word
     opening = "[ "
     closing = " ]"
     opening_len = len(opening)
     closing_len = len(closing)
     available = col_w - opening_len - closing_len
+    word_len = len(word)
 
-    if len(word) > available:
-        # Truncate word if too long
+    if word_len > available:
+        # Word too long: minimal padding (truncate if necessary)
         word_part = word[:available]
         tile = opening + word_part + closing
     else:
-        # Left-align word with spaces to fill available space
-        spaces = " " * (available - len(word))
-        tile = opening + word + spaces + closing
+        # Center the word within available space
+        left_pad = (available - word_len) // 2
+        right_pad = available - word_len - left_pad
+        tile = opening + (" " * left_pad) + word + (" " * right_pad) + closing
 
     # Ensure tile is exactly col_w (pad/truncate if needed)
     if len(tile) < col_w:
@@ -419,7 +421,9 @@ def main_loop(stdscr, state: GameState, use_ascii: bool = False):
                 for g in state.groups:
                     if g.words & set(state.remaining_words):
                         words_sorted = sorted(list(g.words), key=str.lower)
-                        state.solved.append((g.title, words_sorted))
+                        state.solved.append(
+                            (g.title, words_sorted, int(g.difficulty or 0))
+                        )
                         state.remaining_words = [
                             w for w in state.remaining_words if w not in g.words
                         ]
