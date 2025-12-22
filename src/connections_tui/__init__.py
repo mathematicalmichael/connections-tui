@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import List, Set, Tuple
 
 import readchar
+from rich.align import Align
 from rich.console import Console
+from rich.console import Group as RichGroup
 from rich.live import Live
 from rich.text import Text
 
@@ -236,14 +238,15 @@ def render_board_tile(
     return text
 
 
-def render_display(state: GameState, cursor: int, use_ascii: bool = False) -> Text:
-    """Render the entire game display as a Rich Text object."""
+def render_display(state: GameState, cursor: int, use_ascii: bool = False):
+    """Render the entire game display as a Rich renderable."""
     output_parts = []
+    spacer = Text(" ")
 
     # Header
     header = Text(f"NYT Connections — {state.date_str}", style="bold")
     output_parts.append(header)
-    output_parts.append("")
+    output_parts.append(spacer)
 
     # Strikes
     strikes_left = state.max_strikes - state.strikes
@@ -256,7 +259,9 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False) -> Te
     )
     strikes_text = Text(f"Strikes: {hearts}")
     output_parts.append(strikes_text)
-    output_parts.append("")
+
+    # Spacer before solved groups / board
+    output_parts.append(spacer)
 
     # Solved groups
     if state.solved:
@@ -272,7 +277,8 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False) -> Te
             output_parts.append(line)
     else:
         output_parts.append(Text("Solved groups: (none yet)"))
-    output_parts.append("")
+    output_parts.append(spacer)
+    output_parts.append(spacer)
 
     # Board
     board_cols = 4
@@ -313,7 +319,8 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False) -> Te
                     row_text.append(" ")
             output_parts.append(row_text)
 
-    output_parts.append("")
+    output_parts.append(spacer)
+    output_parts.append(spacer)
 
     # Footer messages
     if state.strikes >= state.max_strikes:
@@ -331,20 +338,15 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False) -> Te
     if state.one_away_msg:
         output_parts.append(Text(state.one_away_msg, style="yellow"))
 
+    # Spacer before instructions
+    output_parts.append(spacer)
+
     msg = "WASD=move, [Space]=select, [Enter]=submit. shu[f]fle, [c]lear, [q]uit"
     output_parts.append(Text(msg, style="dim"))
 
-    # Combine all parts
-    result = Text()
-    for i, part in enumerate(output_parts):
-        if isinstance(part, Text):
-            result.append(part)
-        else:
-            result.append(str(part))
-        if i < len(output_parts) - 1:
-            result.append("\n")
-
-    return result
+    # Center every line / row of content (including the board and instructions)
+    centered_parts = [Align.center(part) for part in output_parts]
+    return RichGroup(*centered_parts)
 
 
 def load_day_into_state(state: GameState, day_offset: int):
