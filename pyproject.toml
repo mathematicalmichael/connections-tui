@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "connections-tui"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "Play NYT Connections in the Terminal using rich for wide terminal compatibility."
 readme = "README.md"
 license = "MIT"

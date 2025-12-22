@@ -238,7 +238,9 @@ def render_board_tile(
     return text
 
 
-def calculate_board_cols(remaining_words: List[str], width: int) -> Tuple[int, str, int]:
+def calculate_board_cols(
+    remaining_words: List[str], width: int
+) -> Tuple[int, str, int]:
     """Calculate the best column count, spacing, and tile width for the given terminal width."""
     if not remaining_words:
         return 4, " ", 12
@@ -325,9 +327,7 @@ def render_display(
             )
         )
     else:
-        board_cols, spacing, tile_w = calculate_board_cols(
-            state.remaining_words, width
-        )
+        board_cols, spacing, tile_w = calculate_board_cols(state.remaining_words, width)
         grid = chunk(state.remaining_words, board_cols)
 
         # Render board rows
@@ -447,6 +447,9 @@ def _read_key() -> str:
     if key == readchar.key.ENTER:
         return "\n"
     if key == readchar.key.SPACE:
+        return " "
+    # Right Control key (typically sends '\x1d' or Ctrl-])
+    if key == "\x1d":
         return " "
     return key
 
