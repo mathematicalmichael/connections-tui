@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "connections-tui"
-version = "0.0.9"
-description = "Play NYT Connections in the Terminal with no additional dependencies."
+version = "0.1.0rc1"
+description = "Play NYT Connections in the Terminal using rich for wide terminal compatibility."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICEN[CS]E.*"]
@@ -14,7 +14,10 @@ authors = [
     { name = "Michael Pilosov", email = "consistentbayes@gmail.com" }
 ]
 requires-python = ">=3.8"
-dependencies = []
+dependencies = [
+    "readchar>=4.0.0",
+    "rich>=14.2.0",
+]
 
 [project.scripts]
 connections-tui = "connections_tui:run"
