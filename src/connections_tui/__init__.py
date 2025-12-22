@@ -238,15 +238,48 @@ def render_board_tile(
     return text
 
 
-def render_display(state: GameState, cursor: int, use_ascii: bool = False):
+def calculate_board_cols(remaining_words: List[str], width: int) -> Tuple[int, str, int]:
+    """Calculate the best column count, spacing, and tile width for the given terminal width."""
+    if not remaining_words:
+        return 4, " ", 12
+
+    max_word_len = max([len(w) for w in remaining_words], default=0)
+    tile_w = max(12, max_word_len + 4)  # min 12, or word + padding
+
+    if (4 * tile_w + 3) <= width:
+        return 4, " ", tile_w
+    if (4 * tile_w) <= width:
+        return 4, "", tile_w
+    if (3 * tile_w + 2) <= width:
+        return 3, " ", tile_w
+    if (3 * tile_w) <= width:
+        return 3, "", tile_w
+    if (2 * tile_w + 1) <= width:
+        return 2, " ", tile_w
+    if (2 * tile_w) <= width:
+        return 2, "", tile_w
+    return 1, "", tile_w
+
+
+def render_display(
+    state: GameState,
+    cursor: int,
+    use_ascii: bool = False,
+    width: int = 80,
+    height: int = 24,
+):
     """Render the entire game display as a Rich renderable."""
     output_parts = []
     spacer = Text(" ")
 
+    # Smart Padding: Compress header if height is tight
+    is_short = height < 20
+
     # Header
     header = Text(f"NYT Connections — {state.date_str}", style="bold")
     output_parts.append(header)
-    output_parts.append(spacer)
+    if not is_short:
+        output_parts.append(spacer)
 
     # Strikes
     strikes_left = state.max_strikes - state.strikes
@@ -261,7 +294,8 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False):
     output_parts.append(strikes_text)
 
     # Spacer before solved groups / board
-    output_parts.append(spacer)
+    if not is_short:
+        output_parts.append(spacer)
 
     # Solved groups
     if state.solved:
@@ -278,12 +312,11 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False):
     else:
         output_parts.append(Text("Solved groups: (none yet)"))
     output_parts.append(spacer)
-    output_parts.append(spacer)
+    if not is_short:
+        output_parts.append(spacer)
 
-    # Board
-    board_cols = 4
+    # Board calculation
     total_tiles = len(state.remaining_words)
-
     if total_tiles == 0:
         output_parts.append(
             Text(
@@ -292,41 +325,34 @@ def render_display(state: GameState, cursor: int, use_ascii: bool = False):
             )
         )
     else:
+        board_cols, spacing, tile_w = calculate_board_cols(
+            state.remaining_words, width
+        )
         grid = chunk(state.remaining_words, board_cols)
-
-        # Calculate column widths
-        max_word_len_per_col = [0] * board_cols
-        for row in grid:
-            for c, word in enumerate(row):
-                max_word_len_per_col[c] = max(max_word_len_per_col[c], len(word))
-
-        col_widths = []
-        for max_len in max_word_len_per_col:
-            col_w = max(18, max_len + 6)  # +6 for spacing/padding
-            col_widths.append(col_w)
 
         # Render board rows
         for r, row in enumerate(grid):
             row_text = Text()
             for c, word in enumerate(row):
                 idx = r * board_cols + c
-                col_w = col_widths[c]
                 is_cursor = idx == cursor
                 is_selected = idx in state.selection_idx
-                tile = render_board_tile(word, is_cursor, is_selected, col_w)
+                tile = render_board_tile(word, is_cursor, is_selected, tile_w)
                 row_text.append(tile)
                 if c < len(row) - 1:
-                    row_text.append(" ")
+                    row_text.append(spacing)
             output_parts.append(row_text)
 
     output_parts.append(spacer)
-    output_parts.append(spacer)
+    if not is_short:
+        output_parts.append(spacer)
 
     # Footer messages
     if state.strikes >= state.max_strikes:
         output_parts.append(
             Text(
-                "💥 Out of mistakes! Press q to quit or c to reveal.", style="bold red"
+                "💥 Out of mistakes! Press q to quit or c to reveal.",
+                style="bold red",
             )
         )
 
@@ -431,7 +457,9 @@ def main_loop(state: GameState, use_ascii: bool = False):
     cursor = 0
 
     def render():
-        return render_display(state, cursor, use_ascii)
+        return render_display(
+            state, cursor, use_ascii, width=console.width, height=console.height
+        )
 
     saved_term = _save_terminal_state()
     try:
@@ -460,10 +488,16 @@ def main_loop(state: GameState, use_ascii: bool = False):
                         cursor = (cursor + 1) % total_tiles
                 elif key == "UP" or key.lower() in ("w", "k"):
                     if total_tiles:
-                        cursor = (cursor - 4) % total_tiles
+                        board_cols, _, _ = calculate_board_cols(
+                            state.remaining_words, console.width
+                        )
+                        cursor = (cursor - board_cols) % total_tiles
                 elif key == "DOWN" or key.lower() in ("s", "j"):
                     if total_tiles:
-                        cursor = (cursor + 4) % total_tiles
+                        board_cols, _, _ = calculate_board_cols(
+                            state.remaining_words, console.width
+                        )
+                        cursor = (cursor + board_cols) % total_tiles
                 elif key == " ":
                     if total_tiles:
                         if cursor in state.selection_idx:
