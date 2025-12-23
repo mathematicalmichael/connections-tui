@@ -487,6 +487,8 @@ def _read_key() -> str:
         return "\n"
     if key == readchar.key.SPACE:
         return " "
+    if key == readchar.key.F12:
+        return " "  # F12 acts like space (undocumented)
     # Right Control key (typically sends '\x1d' or Ctrl-])
     if key == "\x1d":
         return " "
