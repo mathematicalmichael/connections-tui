@@ -263,10 +263,42 @@ def calculate_board_cols(
     return 1, "", tile_w
 
 
+def get_cursor_above_below(
+    cursor: int, board_cols: int, total_tiles: int, direction: int
+) -> int:
+    """Get the cursor index above/below, respecting visual centering of short rows."""
+    if total_tiles == 0:
+        return 0
+
+    # 1. Determine current row and visual column
+    cur_row = cursor // board_cols
+    row_start = cur_row * board_cols
+    row_len = min(board_cols, total_tiles - row_start)
+    col_in_row = cursor % board_cols
+    # Visual offset for centering: (capacity - actual) / 2
+    offset = (board_cols - row_len) / 2
+    visual_col = col_in_row + offset
+
+    # 2. Determine target row (with wrap-around)
+    total_rows = (total_tiles + board_cols - 1) // board_cols
+    target_row = (cur_row + direction) % total_rows
+
+    # 3. Find index in target row that best matches visual_col
+    target_row_start = target_row * board_cols
+    target_row_len = min(board_cols, total_tiles - target_row_start)
+    target_offset = (board_cols - target_row_len) / 2
+
+    # visual_col = target_col + target_offset => target_col = visual_col - target_offset
+    target_col = round(visual_col - target_offset)
+    target_col = max(0, min(target_col, target_row_len - 1))
+
+    return target_row_start + target_col
+
+
 def render_display(
     state: GameState,
     cursor: int,
-    use_ascii: bool = False,
+    use_pretty: bool = False,
     width: int = 80,
     height: int = 24,
 ):
@@ -278,17 +310,17 @@ def render_display(
     is_short = height < 20
 
     # Header
-    header = Text(f"NYT Connections — {state.date_str}", style="bold")
+    header = Text(f"NYT Connections - {state.date_str}", style="bold")
     output_parts.append(header)
     if not is_short:
         output_parts.append(spacer)
 
     # Strikes
     strikes_left = state.max_strikes - state.strikes
-    if use_ascii:
-        heart_full, heart_empty = "O", "x"
-    else:
+    if use_pretty:
         heart_full, heart_empty = "❤", "♡"
+    else:
+        heart_full, heart_empty = "O", "x"
     hearts = heart_full * strikes_left + heart_empty * (
         state.max_strikes - strikes_left
     )
@@ -454,14 +486,14 @@ def _read_key() -> str:
     return key
 
 
-def main_loop(state: GameState, use_ascii: bool = False):
+def main_loop(state: GameState, use_pretty: bool = False):
     """Main game loop using rich Live display."""
     console = Console()
     cursor = 0
 
     def render():
         return render_display(
-            state, cursor, use_ascii, width=console.width, height=console.height
+            state, cursor, use_pretty, width=console.width, height=console.height
         )
 
     saved_term = _save_terminal_state()
@@ -494,13 +526,17 @@ def main_loop(state: GameState, use_ascii: bool = False):
                         board_cols, _, _ = calculate_board_cols(
                             state.remaining_words, console.width
                         )
-                        cursor = (cursor - board_cols) % total_tiles
+                        cursor = get_cursor_above_below(
+                            cursor, board_cols, total_tiles, -1
+                        )
                 elif key == "DOWN" or key.lower() in ("s", "j"):
                     if total_tiles:
                         board_cols, _, _ = calculate_board_cols(
                             state.remaining_words, console.width
                         )
-                        cursor = (cursor + board_cols) % total_tiles
+                        cursor = get_cursor_above_below(
+                            cursor, board_cols, total_tiles, 1
+                        )
                 elif key == " ":
                     if total_tiles:
                         if cursor in state.selection_idx:
@@ -525,6 +561,9 @@ def main_loop(state: GameState, use_ascii: bool = False):
                         state.selection_idx.clear()
                         state.one_away_msg = None
                 elif key in ("\r", "\n"):  # Enter
+                    # If game is lost, Enter quits
+                    if state.strikes >= state.max_strikes:
+                        break
                     if total_tiles:
                         ok, feedback = submit_selection(state)
                         if not ok:
@@ -603,10 +642,12 @@ def parse_args():
         "-s", "--seed", type=int, help="Random seed for reproducible shuffles"
     )
     ap.add_argument(
-        "-a",
-        "--ascii",
+        "-p",
+        "--pretty",
+        "--fancy",
         action="store_true",
-        help="Use ASCII-only characters for strikes display (hearts)",
+        dest="pretty",
+        help="Use Unicode hearts (❤/♡) for strikes display instead of ASCII (O/x)",
     )
     return ap.parse_args()
 
@@ -631,7 +672,7 @@ def main():
 
     board = make_initial_board(groups)
     state = GameState(date_str=date_str, groups=groups, remaining_words=board)
-    main_loop(state, use_ascii=args.ascii)
+    main_loop(state, use_pretty=getattr(args, "pretty", False))
 
 
 def run():
