@@ -66,6 +66,11 @@ class GameState:
     needs_full_redraw: bool = True
 
 
+def normalize_word(word: str) -> str:
+    """Normalize word for terminal compatibility (e.g., replace curly apostrophe)."""
+    return word.replace("’", "'")
+
+
 def load_puzzle_from_json(obj: dict) -> List[Group]:
     """
     Parse NYT Connections JSON from v2 API format:
@@ -84,9 +89,11 @@ def load_puzzle_from_json(obj: dict) -> List[Group]:
         if not isinstance(cards, list) or len(cards) != 4:
             raise ValueError(f"Category '{title}' doesn't have exactly 4 cards.")
 
-        members = [card["content"] for card in cards]
+        members = [normalize_word(card["content"]) for card in cards]
         # Store position info for board layout
-        positions = [(card["content"], card["position"]) for card in cards]
+        positions = [
+            (normalize_word(card["content"]), card["position"]) for card in cards
+        ]
 
         # Assume difficulty is category order (0-3)
         difficulty = i
