@@ -60,7 +60,7 @@ TILE_STATES = {
         text_style="",  # Base state - keep as is
     ),
     (True, False): TileState(
-        show_brackets=True,
+        show_brackets=False,
         text_style="reverse bold",  # Selected but not hovered
     ),
     (False, True): TileState(
@@ -68,7 +68,7 @@ TILE_STATES = {
         text_style="reverse",  # Hovered but not selected
     ),
     (True, True): TileState(
-        show_brackets=False,
+        show_brackets=True,
         text_style="reverse bold",  # Selected and hovered
     ),
 }
