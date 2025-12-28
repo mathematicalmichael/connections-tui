@@ -40,6 +40,41 @@ EASIEST_TO_HARDEST_COLORS = [
 
 
 @dataclass
+class TileState:
+    """Configuration for how a tile appears in a given state."""
+
+    show_brackets: bool = True  # Show [ ] brackets
+    text_style: str = ""  # Rich text style (e.g., "reverse", "bold", "reverse bold")
+    # Examples:
+    # - "reverse" = reverse video (highlighted)
+    # - "bold" = bold text
+    # - "reverse bold" = reverse video + bold
+    # - "" = default styling
+
+
+# Tile state configurations - easy to experiment with different visual styles
+TILE_STATES = {
+    # State: (is_selected, is_hovered)
+    (False, False): TileState(
+        show_brackets=True,
+        text_style="",  # Base state - keep as is
+    ),
+    (True, False): TileState(
+        show_brackets=True,
+        text_style="reverse bold",  # Selected but not hovered
+    ),
+    (False, True): TileState(
+        show_brackets=True,
+        text_style="reverse",  # Hovered but not selected
+    ),
+    (True, True): TileState(
+        show_brackets=False,
+        text_style="reverse bold",  # Selected and hovered
+    ),
+}
+
+
+@dataclass
 class Group:
     title: str
     words: Set[str]
@@ -210,8 +245,18 @@ def render_board_tile(
     col_width: int,
 ) -> Text:
     """Render a single board tile."""
-    opening = "[ "
-    closing = " ]"
+    # Get state configuration
+    state_key = (is_selected, is_cursor)
+    state_config = TILE_STATES.get(state_key, TILE_STATES[(False, False)])
+
+    # Set brackets based on state
+    if state_config.show_brackets:
+        opening = "[ "
+        closing = " ]"
+    else:
+        opening = "  "  # Invisible brackets (spaces)
+        closing = "  "
+
     available = col_width - len(opening) - len(closing)
 
     # Truncate word if too long
@@ -233,14 +278,12 @@ def render_board_tile(
 
     text = Text(tile_text)
 
-    # Selection takes priority over cursor
-    if is_selected:
-        # Selected: white background with black text
-        text.stylize("reverse", 0, len(tile_text))
-        text.stylize("bold", 0, len(tile_text))
-    elif is_cursor:
-        # Cursor: reverse video (highlighted but not selected)
-        text.stylize("reverse", 0, len(tile_text))
+    # Apply text styling based on state
+    if state_config.text_style:
+        # Parse and apply styles (support multiple styles like "reverse bold")
+        styles = state_config.text_style.split()
+        for style in styles:
+            text.stylize(style, 0, len(tile_text))
 
     return text
 
